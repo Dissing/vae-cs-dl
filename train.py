@@ -3,13 +3,16 @@ from torch import nn
 from torch.nn import functional as F
 
 from skimage import io
+from skimage.color import hsv2rgb
 import torchvision
 from torchvision import transforms
 from torch.utils.data import DataLoader
 from datasets.sprites import SpritesDataset
 
 batch_size = 64
-h_dim = 576
+f_depth = 64
+f_width = 8
+h_dim = f_depth * f_width * f_width
 
 class Flatten(nn.Module):
     def forward(self, input):
@@ -17,7 +20,7 @@ class Flatten(nn.Module):
 
 class UnFlatten(nn.Module):
     def forward(self, input):
-        return input.view(input.size(0), h_dim // 9, 3, 3)
+        return input.view(input.size(0), f_depth, f_width, f_width)
 
 class VAE(nn.Module):
 
@@ -25,13 +28,16 @@ class VAE(nn.Module):
         super(VAE, self).__init__()
 
         self.encoder = nn.Sequential(
-            nn.Conv2d(3, 32, 3, 2),
+            nn.Conv2d(3, 32, 4, stride=2, padding=1),
+            nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.Conv2d(32, 32, 3, 2),
+            nn.Conv2d(32, 32, 4, stride=2, padding=1),
+            nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.Conv2d(32, 64, 3, 2),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, 3, 2),
+            #nn.Conv2d(32, 64, 3, stride=2, padding=1),
+            #nn.BatchNorm2d(64),
+            #nn.ReLU(),
+            nn.Conv2d(32, 64, 4, stride=2, padding=1),
             nn.ReLU(),
             Flatten(),
         )
@@ -42,16 +48,20 @@ class VAE(nn.Module):
 
         self.decoder = nn.Sequential(
             UnFlatten(),
-            nn.ConvTranspose2d(h_dim // 9, 32, 3, 2),
+            nn.ConvTranspose2d(f_depth, 32, 4, stride=2, padding=1),
+            nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.ConvTranspose2d(32, 32, 3, 2),
+            nn.ConvTranspose2d(32, 32, 4, stride=2, padding=1),
+            nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.ConvTranspose2d(32, 32, 3, 2),
+            nn.ConvTranspose2d(32, 32, 4, stride=2, padding=1),
+            nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.ConvTranspose2d(32, 32, 4, 2),
-            nn.ReLU(),
+            #nn.ConvTranspose2d(32, 32, 3, stride=2, padding=1, output_padding=1),
+            #nn.BatchNorm2d(32),
+            #nn.ReLU(),
             nn.ConvTranspose2d(32, 3, 1, 1),
-            nn.ReLU(),
+            nn.Sigmoid(),
         )
 
     def forward(self, x):
@@ -64,10 +74,10 @@ class VAE(nn.Module):
         return self.decoder(zp), mu, sigma
 
 def loss_fn(rx, x, mu, sigma):
-    BCE = F.mse_loss(rx, x, size_average=False)
+    BCE = F.binary_cross_entropy(rx, x, reduction='sum')
 
     KLD = -0.5 * torch.sum(1 + sigma - mu**2 - sigma.exp())
-    return BCE + 1 * KLD
+    return BCE + 2.0 * KLD
 
 if __name__ == "__main__":
 
@@ -76,14 +86,14 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available else "cpu")
 
-    model = VAE(15)
+    model = VAE(10)
     if torch.cuda.is_available():
         model.cuda()
 
     opt = torch.optim.Adam(model.parameters(), lr=5e-4)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[8,20], gamma=0.1)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[8,20,30], gamma=0.1)
 
-    epochs = 200
+    epochs = 50
 
     for epoch in range(epochs):
         for idx, images in enumerate(loader):

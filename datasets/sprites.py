@@ -1,10 +1,12 @@
 import os
 
+import numpy as np
 import torch
 from torch.utils.data import Dataset
 from torchvision import transforms, utils
 
 from skimage import io, transform
+from skimage.color import rgb2hsv
 
 class SpritesDataset(Dataset):
 
@@ -23,6 +25,8 @@ class SpritesDataset(Dataset):
         img_name = os.path.join(self.root_dir, str(idx) + ".png")
 
         image = io.imread(img_name)
+
+        #image = np.float32(rgb2hsv(image))
 
         if self.transform:
             image = self.transform(image)
